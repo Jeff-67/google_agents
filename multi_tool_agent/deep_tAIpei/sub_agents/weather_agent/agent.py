@@ -2,7 +2,6 @@ import os
 import requests
 import json
 from google.adk.agents import Agent
-from google.adk.tools import agent_tool
 
 from deep_tAIpei.tools.place import get_current_place
 from deep_tAIpei.tools.search import google_search_agent
@@ -48,9 +47,8 @@ weather_agent = Agent(
                 "   - Use 'google_weather_api' to get precise weather data when latitude and longitude are known "
                 "   - Use 'get_current_place' tool to find the current location including latitude and longitude "
                 "   - You can extract latitude and longitude from get_current_place response and pass them to google_weather_api "
-                "   - Use 'google_search_agent' to find weather information for specific cities "
-                "   - If no city is specified, first use 'get_current_place' tool to find the current location and then use 'google_weather_api' or 'google_search_agent' to find weather for that location ",
-    tools=[agent_tool.AgentTool(agent=google_search_agent), get_current_place, google_weather_api],
+                "   - If no city is specified, first use 'get_current_place' tool to find the current location and then use 'google_weather_api' to find weather for that location ",
+    tools=[get_current_place, google_weather_api],
 )
 
 

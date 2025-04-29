@@ -4,111 +4,478 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ADK Chat</title>
+    <!-- Add marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+    <!-- Add DOMPurify for sanitizing HTML -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.5/dist/purify.min.js"></script>
+    <!-- Import Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // Configure marked.js
+        document.addEventListener('DOMContentLoaded', function() {
+            // Test if marked is available
+            if (typeof marked === 'undefined') {
+                console.error('Marked.js not loaded properly');
+                return;
+            }
+            
+            // Configure marked
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                headerIds: false,
+                mangle: false,
+                sanitize: false,
+                smartLists: true,
+                smartypants: true,
+                xhtml: false
+            });
+            
+            console.log('Marked.js configured successfully');
+            
+            // Test parsing
+            const testMd = "**Bold** and *italic* with [link](https://example.com) and\n* List item 1\n* List item 2";
+            console.log('Test markdown:', testMd);
+            console.log('Parsed result:', marked.parse(testMd));
+        });
+    </script>
     <style>
+        :root {
+            --primary-color: #6c5ce7;
+            --primary-dark: #5541d7;
+            --primary-light: #a29bfe;
+            --secondary-color: #00cec9;
+            --accent-color: #fd79a8;
+            --text-primary: #2d3436;
+            --text-secondary: #636e72;
+            --bg-color: #f9fafe;
+            --card-bg: #ffffff;
+            --user-msg-bg: #e4f0ff;
+            --agent-msg-bg: #f5f7ff;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 24px;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+            max-width: 1000px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
+
+        h1 {
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-size: 2.5rem;
+            letter-spacing: -0.5px;
+        }
+
         #chat-container {
-            height: 500px;
-            border: 1px solid #ccc;
+            flex: 1;
+            background-color: var(--card-bg);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
             overflow-y: auto;
-            padding: 20px;
-            margin-bottom: 20px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            height: 60vh;
+            scrollbar-width: thin;
+            transition: var(--transition);
         }
+
+        #chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        #chat-container::-webkit-scrollbar-thumb {
+            background: var(--primary-light);
+            border-radius: 10px;
+        }
+
         .message {
-            margin-bottom: 15px;
-            padding: 10px;
-            border-radius: 5px;
-            white-space: pre-wrap;
+            margin-bottom: 1rem;
+            padding: 1rem 1.2rem;
+            border-radius: var(--radius-sm);
+            animation: fadeIn 0.3s ease-out;
+            box-shadow: var(--shadow-sm);
+            max-width: 80%;
         }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message a {
+            color: var(--primary-color);
+            text-decoration: none;
+            word-break: break-all;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .message a:hover {
+            color: var(--primary-dark);
+            text-decoration: underline;
+        }
+
         .user-message {
-            background-color: #e3f2fd;
-            margin-left: 20%;
+            background-color: var(--user-msg-bg);
+            color: var(--text-primary);
+            margin-left: auto;
+            border-radius: var(--radius-sm) 0 var(--radius-sm) var(--radius-sm);
+            border-right: 4px solid var(--primary-color);
+            font-weight: 500;
         }
+
         .agent-message {
-            background-color: #f5f5f5;
-            margin-right: 20%;
+            background-color: var(--agent-msg-bg);
+            color: var(--text-primary);
+            margin-right: auto;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) var(--radius-sm);
+            border-left: 4px solid var(--secondary-color);
         }
+
+        .streaming:after {
+            content: '...';
+            display: inline-block;
+            width: 1em;
+            animation: streamingDots 1.5s infinite;
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        @keyframes streamingDots {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+
         .system-message {
-            color: #666;
+            color: var(--text-secondary);
             font-style: italic;
             text-align: center;
+            background-color: rgba(255, 255, 255, 0.7);
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-sm);
+            margin: 0.8rem auto;
+            max-width: 90%;
+            font-size: 0.9rem;
+            box-shadow: var(--shadow-sm);
+            border-left: 2px solid var(--accent-color);
+            border-right: 2px solid var(--accent-color);
         }
+
         .debugging {
-            font-family: monospace;
-            font-size: 12px;
-            color: #666;
-            background-color: #f9f9f9;
-            border: 1px solid #ddd;
-            padding: 5px;
-            margin-top: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            background-color: rgba(0, 0, 0, 0.03);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            margin-top: 0.5rem;
             overflow-x: auto;
             max-height: 150px;
             display: none;
         }
+
         #input-container {
             display: flex;
-            gap: 10px;
+            gap: 0.8rem;
+            position: relative;
+            margin-bottom: 1rem;
         }
+
         #message-input {
             flex-grow: 1;
-            padding: 10px;
+            padding: 1rem 1.2rem;
+            border: none;
+            border-radius: var(--radius-lg);
+            background-color: var(--card-bg);
+            box-shadow: var(--shadow-sm);
+            font-family: 'Poppins', sans-serif;
+            font-size: 1rem;
+            color: var(--text-primary);
+            transition: var(--transition);
         }
+
+        #message-input:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--primary-light);
+        }
+
         button {
-            padding: 10px 20px;
-            background-color: #2196f3;
+            padding: 0.8rem 1.5rem;
+            background: linear-gradient(45deg, var(--primary-color), var(--primary-dark));
             color: white;
             border: none;
-            border-radius: 5px;
+            border-radius: var(--radius-lg);
             cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
+
         button:hover {
-            background-color: #1976d2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(108, 92, 231, 0.3);
         }
+
+        button:active {
+            transform: translateY(0);
+        }
+
         button:disabled {
-            background-color: #ccc;
+            background: linear-gradient(45deg, #b2b2b2, #d3d3d3);
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
+
         #session-container {
-            margin-bottom: 20px;
+            margin-bottom: 2rem;
             text-align: center;
         }
+
         .hidden {
             display: none;
         }
+
         #settings-container {
-            margin-bottom: 20px;
+            margin-bottom: 1.5rem;
             display: flex;
             justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
         }
+
         .toggle-label {
             display: flex;
             align-items: center;
             cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            user-select: none;
         }
+
         .toggle-switch {
-            margin-left: 5px;
-            margin-right: 10px;
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+            margin: 0 0.5rem;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: var(--primary-color);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        #location-status {
+            display: flex;
+            align-items: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-right: auto;
+            background-color: var(--card-bg);
+            padding: 0.5rem 0.8rem;
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .location-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            transition: var(--transition);
+        }
+
+        .location-on {
+            background-color: #00b894;
+            box-shadow: 0 0 8px rgba(0, 184, 148, 0.5);
+        }
+
+        .location-off {
+            background-color: #ff7675;
+            box-shadow: 0 0 8px rgba(255, 118, 117, 0.5);
+        }
+
+        .location-pending {
+            background-color: #fdcb6e;
+            box-shadow: 0 0 8px rgba(253, 203, 110, 0.5);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+
+        #create-session-btn {
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            border-radius: var(--radius-md);
+            margin: 2rem auto;
+            display: block;
+        }
+
+        .message ul, .message ol {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            padding-left: 1.5rem;
+        }
+
+        .message li {
+            margin-bottom: 0.3rem;
+        }
+
+        .message p {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        #request-location-btn {
+            font-size: 0.8rem;
+            padding: 0.4rem 0.8rem;
+            margin-left: 0.5rem;
+        }
+
+        #chat-interface {
+            display: flex;
+            flex-direction: column;
+            height: 85vh;
+        }
+
+        /* Dark mode support - add a toggle button to your HTML */
+        .dark-mode {
+            --bg-color: #1a1c2a;
+            --card-bg: #282a36;
+            --text-primary: #f8f8f2;
+            --text-secondary: #d3d3d3;
+            --user-msg-bg: #483d8b;
+            --agent-msg-bg: #2c2c44;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+            
+            .message {
+                max-width: 90%;
+            }
+            
+            h1 {
+                font-size: 1.8rem;
+            }
+            
+            #settings-container {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            #location-status {
+                margin-right: 0;
+                margin-bottom: 0.5rem;
+                width: 100%;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>ADK Chat Interface</h1>
+    <h1>Taipei travel guide built by Google ADK</h1>
     <div id="session-container">
         <button onclick="createSession()" id="create-session-btn">Create Session</button>
     </div>
     <div id="chat-interface" class="hidden">
         <div id="settings-container">
+            <div id="location-status">
+                <span class="location-indicator location-pending"></span>
+                <span id="location-text">Requesting location...</span>
+                <button id="request-location-btn" class="hidden" onclick="requestLocation()">Enable Location</button>
+            </div>
             <label class="toggle-label">
                 <span>Use Streaming</span>
-                <input type="checkbox" id="streaming-toggle" class="toggle-switch" checked>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="streaming-toggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
             </label>
             <label class="toggle-label">
                 <span>Show Debug Info</span>
-                <input type="checkbox" id="debug-toggle" class="toggle-switch">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="debug-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
             </label>
         </div>
         <div id="chat-container"></div>
@@ -126,6 +493,97 @@
         const SESSION_ID = 's_123';
         let sessionCreated = false;
         let activeResponseId = null; // Track the current response message for streaming
+
+        // Location tracking
+        let userLocation = null;
+        let locationStatus = 'pending'; // 'pending', 'granted', 'denied', 'unsupported'
+
+        function updateLocationStatus(status, message) {
+            const indicator = document.querySelector('.location-indicator');
+            const statusText = document.getElementById('location-text');
+            const requestBtn = document.getElementById('request-location-btn');
+            
+            locationStatus = status;
+            
+            // Update indicator
+            indicator.className = 'location-indicator';
+            indicator.classList.add(`location-${status === 'granted' ? 'on' : (status === 'pending' ? 'pending' : 'off')}`);
+            
+            // Update text
+            statusText.textContent = message;
+            
+            // Show/hide request button
+            if (status === 'denied') {
+                requestBtn.classList.remove('hidden');
+            } else {
+                requestBtn.classList.add('hidden');
+            }
+        }
+
+        function requestLocation() {
+            updateLocationStatus('pending', 'Requesting location...');
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    handleLocationSuccess,
+                    handleLocationError
+                );
+            } else {
+                updateLocationStatus('unsupported', 'Geolocation not supported by browser');
+            }
+        }
+
+        function handleLocationSuccess(position) {
+            userLocation = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                accuracy: position.coords.accuracy,
+                timestamp: new Date().toISOString()
+            };
+            
+            updateLocationStatus('granted', `Location available (${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)})`);
+            
+            // Send location to server
+            storeLocation();
+        }
+
+        function handleLocationError(error) {
+            console.error('Geolocation error:', error);
+            
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    updateLocationStatus('denied', 'Location permission denied');
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    updateLocationStatus('denied', 'Location information unavailable');
+                    break;
+                case error.TIMEOUT:
+                    updateLocationStatus('denied', 'Location request timed out');
+                    break;
+                default:
+                    updateLocationStatus('denied', 'Unknown location error');
+            }
+        }
+
+        async function storeLocation() {
+            if (!userLocation) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/proxy/store_location`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(userLocation)
+                });
+                
+                if (!response.ok) {
+                    console.error('Failed to store location on server');
+                }
+            } catch (error) {
+                console.error('Error storing location:', error);
+            }
+        }
 
         async function createSession() {
             const createSessionBtn = document.getElementById('create-session-btn');
@@ -163,6 +621,9 @@
                     document.getElementById('session-container').classList.add('hidden');
                     sessionCreated = true;
                     addMessage('Using existing session. You can now start chatting.', 'system');
+                    
+                    // Request location as soon as session is created/connected
+                    requestLocation();
                     return;
                 }
 
@@ -175,6 +636,9 @@
                 document.getElementById('session-container').classList.add('hidden');
                 sessionCreated = true;
                 addMessage('Session created successfully! You can now start chatting.', 'system');
+                
+                // Request location as soon as session is created
+                requestLocation();
             } catch (error) {
                 console.error('Error creating session:', error);
                 addMessage(`Error: ${error.message}. Make sure you started the ADK server in the correct directory.`, 'system');
@@ -187,20 +651,28 @@
         function addMessage(text, type, responseId = null) {
             const chatContainer = document.getElementById('chat-container');
             
+            // Debug the input text
+            if (type === 'agent') {
+                console.log('Agent message to parse:', text);
+            }
+            
             // If this is a streaming update and we have a response ID, find the existing message
             if (type === 'agent' && responseId && responseId === activeResponseId) {
                 const existingMsg = document.getElementById(`response-${responseId}`);
                 if (existingMsg) {
-                    existingMsg.textContent = text;
+                    // Only parse markdown for agent messages
+                    existingMsg.innerHTML = type === 'user' ? text : processText(text);
                     chatContainer.scrollTop = chatContainer.scrollHeight;
-                    return;
+                    return existingMsg;
                 }
             }
             
             // Otherwise create a new message
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}-message`;
-            messageDiv.textContent = text;
+            
+            // Only parse markdown for agent messages
+            messageDiv.innerHTML = type === 'user' ? text : processText(text);
             
             // If this is an agent response with an ID, set it
             if (type === 'agent' && responseId) {
@@ -212,6 +684,109 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
             
             return messageDiv;
+        }
+        
+        // Helper function to process text with markdown and fix URLs
+        function processText(text) {
+            if (!text) return '';
+            
+            console.log('Processing text with markdown:', text);
+            
+            try {
+                // Pre-process the text to ensure proper markdown format
+                // Make sure numbered lists have a space after the period
+                let processedText = text.replace(/^(\d+)\.(\S)/gm, '$1. $2');
+                
+                // Make sure bullet points have a space after them
+                processedText = processedText.replace(/^[*-](\S)/gm, '* $1');
+                
+                console.log('Pre-processed text:', processedText);
+                
+                // Process with marked library
+                const markedOutput = marked.parse(processedText);
+                console.log('Marked output:', markedOutput);
+                
+                // Sanitize the output with DOMPurify to prevent XSS
+                const sanitized = typeof DOMPurify !== 'undefined' ? 
+                    DOMPurify.sanitize(markedOutput) : markedOutput;
+                
+                return sanitized;
+            } catch (e) {
+                console.error("Error parsing markdown:", e);
+                // Fallback to basic processing if marked fails
+                return simpleMarkdown(text);
+            }
+        }
+        
+        // Simple markdown processor as fallback
+        function simpleMarkdown(text) {
+            if (!text) return '';
+            
+            console.log('Using simple markdown processor');
+            
+            // Convert line breaks to <br>
+            let html = text.replace(/\n/g, '<br>');
+            
+            // Bold text
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            
+            // Italic text
+            html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+            
+            // Numbered lists
+            if (html.match(/^\d+\.\s+.+/gm)) {
+                let lines = html.split('<br>');
+                let inList = false;
+                
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].match(/^\d+\.\s+.+/)) {
+                        if (!inList) {
+                            lines[i] = '<ol><li>' + lines[i].replace(/^\d+\.\s+/, '') + '</li>';
+                            inList = true;
+                        } else {
+                            lines[i] = '<li>' + lines[i].replace(/^\d+\.\s+/, '') + '</li>';
+                        }
+                        
+                        // If next line is not a list item or this is the last line
+                        if (i === lines.length - 1 || !lines[i+1].match(/^\d+\.\s+.+/)) {
+                            lines[i] += '</ol>';
+                            inList = false;
+                        }
+                    }
+                }
+                
+                html = lines.join('<br>');
+            }
+            
+            // Bullet lists
+            if (html.match(/^[\*-]\s+.+/gm)) {
+                let lines = html.split('<br>');
+                let inList = false;
+                
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].match(/^[\*-]\s+.+/)) {
+                        if (!inList) {
+                            lines[i] = '<ul><li>' + lines[i].replace(/^[\*-]\s+/, '') + '</li>';
+                            inList = true;
+                        } else {
+                            lines[i] = '<li>' + lines[i].replace(/^[\*-]\s+/, '') + '</li>';
+                        }
+                        
+                        // If next line is not a list item or this is the last line
+                        if (i === lines.length - 1 || !lines[i+1].match(/^[\*-]\s+.+/)) {
+                            lines[i] += '</ul>';
+                            inList = false;
+                        }
+                    }
+                }
+                
+                html = lines.join('<br>');
+            }
+            
+            // URLs
+            html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+            
+            return html;
         }
 
         function addDebugInfo(messageElement, data) {
@@ -310,6 +885,13 @@
                         // Skip empty events
                         if (!event.data.trim()) return;
                         
+                        // Get chat container here to ensure it's in scope
+                        const chatContainer = document.getElementById('chat-container');
+                        if (!chatContainer) {
+                            console.error('Chat container not found');
+                            return;
+                        }
+                        
                         try {
                             // Process each event
                             console.log("SSE Event:", event);
@@ -356,15 +938,60 @@
                                     
                                     // Text response (final output)
                                     if (part.text) {
-                                        finalText = part.text;
+                                        // Check if this is a complete message
+                                        const isCompleteMessage = 
+                                            part.text.length > 50 || // Longer messages are likely complete
+                                            part.text.includes("Function") && part.text.includes("completed") ||
+                                            part.text.trim().startsWith("Okay,") ||
+                                            part.text.trim().startsWith("Here are") ||
+                                            part.text.trim().startsWith("Sure,");
+                                            
+                                        if (isCompleteMessage) {
+                                            // This is a complete message - replace existing content
+                                            finalText = part.text;
+                                        } else if (!finalText.includes(part.text)) {
+                                            // This is a fragment - append if not already included
+                                            finalText += part.text;
+                                        }
                                         
                                         if (!messageElement) {
-                                            messageElement = addMessage(finalText, 'agent', data.id);
+                                            // Create the initial message element without markdown
+                                            messageElement = document.createElement('div');
+                                            messageElement.className = `message agent-message streaming`;
+                                            messageElement.textContent = finalText;
+                                            
+                                            if (data.id) {
+                                                messageElement.id = `response-${data.id}`;
+                                                activeResponseId = data.id;
+                                            }
+                                            
+                                            chatContainer.appendChild(messageElement);
                                             addDebugInfo(messageElement, data);
                                         } else {
+                                            // Update the text content first
                                             messageElement.textContent = finalText;
+                                            
+                                            // Only apply markdown on the final message or after a delay
+                                            clearTimeout(messageElement.pendingMarkdown);
+                                            
+                                            if (isCompleteMessage) {
+                                                // Apply markdown immediately for complete messages
+                                                messageElement.classList.remove('streaming');
+                                                messageElement.innerHTML = processText(finalText);
+                                                console.log('Applied markdown to complete message');
+                                            } else {
+                                                // For fragments, wait a bit to collect more text
+                                                messageElement.pendingMarkdown = setTimeout(() => {
+                                                    messageElement.classList.remove('streaming');
+                                                    messageElement.innerHTML = processText(finalText);
+                                                    console.log('Applied markdown to accumulated text');
+                                                }, 500);
+                                            }
+                                            
                                             addDebugInfo(messageElement, data);
                                         }
+                                        
+                                        chatContainer.scrollTop = chatContainer.scrollHeight;
                                     }
                                 }
                             }
@@ -385,6 +1012,9 @@
                         // Show error if no messages have been displayed
                         if (!messageElement) {
                             addMessage("Error getting response from agent", 'system');
+                        } else {
+                            // Make sure we remove the streaming indicator if there's an error
+                            messageElement.classList.remove('streaming');
                         }
                         
                         sendButton.disabled = false;

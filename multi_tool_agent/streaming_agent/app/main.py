@@ -1,5 +1,5 @@
 from pathlib import Path
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +16,9 @@ app = FastAPI()
 
 # Store messages temporarily to connect POST and GET
 SSE_MESSAGES = {}
+
+# Store user location information
+USER_LOCATIONS = {}
 
 # Enable CORS
 app.add_middleware(
@@ -34,6 +37,23 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def root():
     """Serves the index.html"""
     return FileResponse(STATIC_DIR / "index.html")
+
+# Location endpoints
+@app.post("/proxy/store_location")
+async def store_location(location: dict = Body(...)):
+    """Store browser location data"""
+    try:
+        # We could use a more complex storage system with user IDs in the future
+        global USER_LOCATIONS
+        USER_LOCATIONS["browser"] = location
+        logger.info(f"Stored browser location: {location['lat']:.4f}, {location['lng']:.4f}")
+        return JSONResponse({"status": "success"})
+    except Exception as e:
+        logger.error(f"Error storing location: {str(e)}")
+        return JSONResponse(
+            content={"detail": str(e)},
+            status_code=500
+        )
 
 # Proxy endpoints
 @app.post("/proxy/session/{app_name}/{user_id}/{session_id}")
@@ -77,8 +97,13 @@ async def run_proxy(request: Request):
                 "http://0.0.0.0:8000/run",
                 json=json_data
             )
+            response_data = response.json()
+            
+            # Check for get_current_place function calls and intercept responses
+            processed_data = intercept_function_calls(response_data)
+            
             return JSONResponse(
-                content=response.json(),
+                content=processed_data,
                 status_code=response.status_code
             )
     except httpx.TimeoutException:
@@ -145,6 +170,9 @@ async def sse_connect(request_id: str):
         
         async def event_generator():
             try:
+                function_call_detected = False
+                current_function_id = None
+                
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     async with client.stream("POST", "http://0.0.0.0:8000/run_sse", json=request_data) as response:
                         if response.status_code != 200:
@@ -153,9 +181,58 @@ async def sse_connect(request_id: str):
                             return
                             
                         async for chunk in response.aiter_text():
-                            # Forward each chunk directly
-                            if chunk.strip():
-                                yield chunk
+                            # Skip empty chunks
+                            if not chunk.strip():
+                                continue
+                                
+                            # Process each chunk to intercept function calls
+                            if chunk.startswith("data: "):
+                                chunk_data = chunk[6:]  # Remove "data: " prefix
+                                try:
+                                    data = json.loads(chunk_data)
+                                    
+                                    # Process function calls and modify responses if needed
+                                    if data.get("content") and data["content"].get("parts"):
+                                        for part_index, part in enumerate(data["content"]["parts"]):
+                                            # Check for functionCall to get_current_place
+                                            if part.get("functionCall") and part["functionCall"].get("name") == "get_current_place":
+                                                function_call_detected = True
+                                                current_function_id = part["functionCall"].get("id")
+                                                logger.info(f"Detected get_current_place call with ID: {current_function_id}")
+                                            
+                                            # Check for functionResponse to get_current_place
+                                            if (function_call_detected and 
+                                                part.get("functionResponse") and 
+                                                part["functionResponse"].get("id") == current_function_id):
+                                                
+                                                # Replace with browser location if available
+                                                if "browser" in USER_LOCATIONS and USER_LOCATIONS["browser"]:
+                                                    browser_loc = USER_LOCATIONS["browser"]
+                                                    
+                                                    # Create a success response with browser location
+                                                    new_response = {
+                                                        "status": "success",
+                                                        "coordinates": {
+                                                            "lat": browser_loc["lat"],
+                                                            "lng": browser_loc["lng"]
+                                                        },
+                                                        "accuracy": browser_loc.get("accuracy", 0),
+                                                        "source": "browser"
+                                                    }
+                                                    
+                                                    # Replace the response
+                                                    data["content"]["parts"][part_index]["functionResponse"]["response"] = new_response
+                                                    logger.info(f"Replaced get_current_place response with browser location")
+                                    
+                                    # Convert back to JSON and format as SSE data
+                                    updated_chunk = f"data: {json.dumps(data)}\n\n"
+                                    yield updated_chunk
+                                except json.JSONDecodeError:
+                                    # If it's not valid JSON, just pass through the original chunk
+                                    yield chunk + "\n\n"
+                            else:
+                                # For any other format, pass through unchanged
+                                yield chunk + "\n\n"
                 
                 # Clean up the request data after completion
                 if request_id in SSE_MESSAGES:
@@ -178,6 +255,41 @@ async def sse_connect(request_id: str):
             content={"detail": str(e)},
             status_code=500
         )
+
+def intercept_function_calls(response_data):
+    """Process API response to intercept function calls"""
+    if not isinstance(response_data, list):
+        return response_data
+        
+    for event in response_data:
+        if not isinstance(event, dict) or not event.get("content") or not event["content"].get("parts"):
+            continue
+            
+        for part_index, part in enumerate(event["content"]["parts"]):
+            # Check for functionResponse from get_current_place
+            if (part.get("functionResponse") and 
+                part["functionResponse"].get("name") == "get_current_place"):
+                
+                # Replace with browser location if available
+                if "browser" in USER_LOCATIONS and USER_LOCATIONS["browser"]:
+                    browser_loc = USER_LOCATIONS["browser"]
+                    
+                    # Create a success response with browser location
+                    new_response = {
+                        "status": "success",
+                        "coordinates": {
+                            "lat": browser_loc["lat"],
+                            "lng": browser_loc["lng"]
+                        },
+                        "accuracy": browser_loc.get("accuracy", 0),
+                        "source": "browser"
+                    }
+                    
+                    # Replace the response
+                    event["content"]["parts"][part_index]["functionResponse"]["response"] = new_response
+                    logger.info(f"Replaced get_current_place response with browser location")
+                
+    return response_data
 
 async def cleanup_request(request_id, delay=60):
     """Clean up request data after a delay"""
