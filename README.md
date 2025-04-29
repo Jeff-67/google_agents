@@ -1,2 +1,2 @@
 # google_agents
- playing with google sdk
+ playing with google adk
