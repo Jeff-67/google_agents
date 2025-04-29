@@ -37,6 +37,18 @@
             font-style: italic;
             text-align: center;
         }
+        .debugging {
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 5px;
+            margin-top: 5px;
+            overflow-x: auto;
+            max-height: 150px;
+            display: none;
+        }
         #input-container {
             display: flex;
             gap: 10px;
@@ -67,6 +79,20 @@
         .hidden {
             display: none;
         }
+        #settings-container {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .toggle-switch {
+            margin-left: 5px;
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
@@ -75,6 +101,16 @@
         <button onclick="createSession()" id="create-session-btn">Create Session</button>
     </div>
     <div id="chat-interface" class="hidden">
+        <div id="settings-container">
+            <label class="toggle-label">
+                <span>Use Streaming</span>
+                <input type="checkbox" id="streaming-toggle" class="toggle-switch" checked>
+            </label>
+            <label class="toggle-label">
+                <span>Show Debug Info</span>
+                <input type="checkbox" id="debug-toggle" class="toggle-switch">
+            </label>
+        </div>
         <div id="chat-container"></div>
         <div id="input-container">
             <input type="text" id="message-input" placeholder="Type your message...">
@@ -89,6 +125,7 @@
         const USER_ID = 'u_123';
         const SESSION_ID = 's_123';
         let sessionCreated = false;
+        let activeResponseId = null; // Track the current response message for streaming
 
         async function createSession() {
             const createSessionBtn = document.getElementById('create-session-btn');
@@ -147,13 +184,67 @@
             }
         }
 
-        function addMessage(text, type) {
+        function addMessage(text, type, responseId = null) {
             const chatContainer = document.getElementById('chat-container');
+            
+            // If this is a streaming update and we have a response ID, find the existing message
+            if (type === 'agent' && responseId && responseId === activeResponseId) {
+                const existingMsg = document.getElementById(`response-${responseId}`);
+                if (existingMsg) {
+                    existingMsg.textContent = text;
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                    return;
+                }
+            }
+            
+            // Otherwise create a new message
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}-message`;
             messageDiv.textContent = text;
+            
+            // If this is an agent response with an ID, set it
+            if (type === 'agent' && responseId) {
+                messageDiv.id = `response-${responseId}`;
+                activeResponseId = responseId;
+            }
+            
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            return messageDiv;
+        }
+
+        function addDebugInfo(messageElement, data) {
+            // Check if we should show debug info
+            const showDebug = document.getElementById('debug-toggle').checked;
+            
+            // Create debug element
+            const debugDiv = document.createElement('div');
+            debugDiv.className = 'debugging';
+            debugDiv.style.display = showDebug ? 'block' : 'none';
+            
+            // Format the debug content
+            let debugContent;
+            try {
+                if (typeof data === 'string') {
+                    debugContent = data;
+                } else {
+                    debugContent = JSON.stringify(data, null, 2);
+                }
+            } catch (e) {
+                debugContent = String(data);
+            }
+            
+            debugDiv.textContent = debugContent;
+            messageElement.appendChild(debugDiv);
+            
+            // Update toggle listener
+            document.getElementById('debug-toggle').addEventListener('change', (e) => {
+                const debugElements = document.querySelectorAll('.debugging');
+                debugElements.forEach(el => {
+                    el.style.display = e.target.checked ? 'block' : 'none';
+                });
+            });
         }
 
         async function sendMessage() {
@@ -165,6 +256,7 @@
             const input = document.getElementById('message-input');
             const sendButton = document.getElementById('send-button');
             const message = input.value.trim();
+            const useStreaming = document.getElementById('streaming-toggle').checked;
             
             if (!message) return;
             
@@ -173,54 +265,190 @@
             input.value = '';
             sendButton.disabled = true;
 
+            // Reset active response tracking
+            activeResponseId = null;
+            
             try {
-                const response = await fetch(`${API_URL}/proxy/run`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        app_name: APP_NAME,
-                        user_id: USER_ID,
-                        session_id: SESSION_ID,
-                        new_message: {
-                            role: "user",
-                            parts: [{
-                                text: message
-                            }]
+                if (useStreaming) {
+                    // Step 1: Prepare the SSE connection by sending a POST request
+                    const prepareResponse = await fetch(`${API_URL}/proxy/prepare_sse`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            app_name: APP_NAME,
+                            user_id: USER_ID,
+                            session_id: SESSION_ID,
+                            new_message: {
+                                role: "user",
+                                parts: [{
+                                    text: message
+                                }]
+                            }
+                        })
+                    });
+                    
+                    if (!prepareResponse.ok) {
+                        throw new Error(`Failed to prepare streaming: ${prepareResponse.status}`);
+                    }
+                    
+                    const prepareData = await prepareResponse.json();
+                    const requestId = prepareData.request_id;
+                    
+                    if (!requestId) {
+                        throw new Error("No request ID received for streaming");
+                    }
+                    
+                    // Step 2: Connect to the SSE endpoint with the request ID
+                    const eventSource = new EventSource(`${API_URL}/proxy/sse_connect/${requestId}`);
+                    
+                    let messageElement = null;
+                    let finalText = '';
+                    
+                    eventSource.onmessage = (event) => {
+                        // Skip empty events
+                        if (!event.data.trim()) return;
+                        
+                        try {
+                            // Process each event
+                            console.log("SSE Event:", event);
+                            
+                            const data = JSON.parse(event.data);
+                            
+                            // Process tool calls, function responses, and text responses
+                            if (data.content && data.content.parts) {
+                                for (const part of data.content.parts) {
+                                    // Function call (showing what the agent is doing)
+                                    if (part.functionCall) {
+                                        const functionName = part.functionCall.name;
+                                        const args = part.functionCall.args;
+                                        finalText = `Fetching data using ${functionName}...`;
+                                        
+                                        if (!messageElement) {
+                                            messageElement = addMessage(finalText, 'agent', data.id);
+                                            addDebugInfo(messageElement, data);
+                                        } else {
+                                            messageElement.textContent = finalText;
+                                            addDebugInfo(messageElement, data);
+                                        }
+                                    }
+                                    
+                                    // Function response
+                                    if (part.functionResponse) {
+                                        const functionName = part.functionResponse.name;
+                                        const response = part.functionResponse.response;
+                                        
+                                        if (response.report) {
+                                            finalText = `Got data from ${functionName}: ${response.report}`;
+                                        } else {
+                                            finalText = `Function ${functionName} completed.`;
+                                        }
+                                        
+                                        if (!messageElement) {
+                                            messageElement = addMessage(finalText, 'agent', data.id);
+                                            addDebugInfo(messageElement, data);
+                                        } else {
+                                            messageElement.textContent = finalText;
+                                            addDebugInfo(messageElement, data);
+                                        }
+                                    }
+                                    
+                                    // Text response (final output)
+                                    if (part.text) {
+                                        finalText = part.text;
+                                        
+                                        if (!messageElement) {
+                                            messageElement = addMessage(finalText, 'agent', data.id);
+                                            addDebugInfo(messageElement, data);
+                                        } else {
+                                            messageElement.textContent = finalText;
+                                            addDebugInfo(messageElement, data);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error("Error processing SSE event:", e);
+                            // Try to show the raw event data if parsing fails
+                            if (!messageElement) {
+                                messageElement = addMessage(`Processing response...`, 'agent');
+                                addDebugInfo(messageElement, event.data);
+                            }
                         }
-                    })
-                });
+                    };
+                    
+                    eventSource.onerror = (error) => {
+                        console.error("SSE Error:", error);
+                        eventSource.close();
+                        
+                        // Show error if no messages have been displayed
+                        if (!messageElement) {
+                            addMessage("Error getting response from agent", 'system');
+                        }
+                        
+                        sendButton.disabled = false;
+                    };
+                    
+                    // Close the event source after a minute (should be done much earlier)
+                    setTimeout(() => {
+                        if (eventSource.readyState !== 2) { // Not closed
+                            eventSource.close();
+                            sendButton.disabled = false;
+                        }
+                    }, 60000);
+                } else {
+                    // Use regular endpoint for non-streaming
+                    const response = await fetch(`${API_URL}/proxy/run`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            app_name: APP_NAME,
+                            user_id: USER_ID,
+                            session_id: SESSION_ID,
+                            new_message: {
+                                role: "user",
+                                parts: [{
+                                    text: message
+                                }]
+                            }
+                        })
+                    });
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`API error: ${response.status} ${errorText}`);
-                }
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`API error: ${response.status} ${errorText}`);
+                    }
 
-                const data = await response.json();
-                console.log("API Response:", data);
-                
-                if (data && data.length > 0) {
-                    // Looking for model responses by checking each event
-                    for (const event of data) {
-                        // Check if this is a model's text response
-                        if (event.content && event.content.parts) {
-                            for (const part of event.content.parts) {
-                                if (part.text) {
-                                    addMessage(part.text, 'agent');
-                                    // Break after finding the first text response
-                                    break;
+                    const data = await response.json();
+                    console.log("API Response:", data);
+                    
+                    if (data && data.length > 0) {
+                        // Looking for model responses by checking each event
+                        for (const event of data) {
+                            // Check if this is a model's text response
+                            if (event.content && event.content.parts) {
+                                for (const part of event.content.parts) {
+                                    if (part.text) {
+                                        const msgElement = addMessage(part.text, 'agent');
+                                        addDebugInfo(msgElement, event);
+                                        // Break after finding the first text response
+                                        break;
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        addMessage("No response from agent", 'system');
                     }
-                } else {
-                    addMessage("No response from agent", 'system');
+                    
+                    sendButton.disabled = false;
                 }
             } catch (error) {
                 console.error('Error sending message:', error);
                 addMessage(`Error: ${error.message}`, 'system');
-            } finally {
                 sendButton.disabled = false;
             }
         }
@@ -230,6 +458,17 @@
             if (e.key === 'Enter' && !document.getElementById('send-button').disabled) {
                 sendMessage();
             }
+        });
+
+        // Toggle event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize any toggles that need immediate setup
+            document.getElementById('debug-toggle').addEventListener('change', (e) => {
+                const debugElements = document.querySelectorAll('.debugging');
+                debugElements.forEach(el => {
+                    el.style.display = e.target.checked ? 'block' : 'none';
+                });
+            });
         });
     </script>
 </body>
