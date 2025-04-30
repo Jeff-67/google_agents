@@ -1,16 +1,48 @@
 from pathlib import Path
 from fastapi import FastAPI, Request, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import logging
 import asyncio
 import json
 import uuid
+import os
+import re
+import dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Load environment variables from the deep_tAIpei/.env file
+project_root = Path(__file__).parents[3]  # Go up 3 levels from app/main.py
+env_path = project_root / "multi_tool_agent" / "deep_tAIpei" / ".env"
+logger.info(f"Looking for .env file at {env_path}")
+if env_path.exists():
+    dotenv.load_dotenv(dotenv_path=env_path)
+    logger.info(f"Loaded environment variables from {env_path}")
+    
+    # Debug: Check if we got the API key
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+else:
+    logger.warning(f"Could not find .env file at {env_path}")
+    
+    # Try an alternative path
+    alt_env_path = project_root / "deep_tAIpei" / ".env"
+    logger.info(f"Trying alternative .env path: {alt_env_path}")
+    if alt_env_path.exists():
+        dotenv.load_dotenv(dotenv_path=alt_env_path)
+        logger.info(f"Loaded environment variables from alternative path {alt_env_path}")
+        
+        # Debug: Check if we got the API key
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+        if api_key:
+            masked_key = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:] if len(api_key) > 8 else "****"
+            logger.info(f"Successfully loaded Google Maps API key from alternative path: {masked_key}")
+        else:
+            logger.error("API key was NOT loaded correctly from alternative path - GOOGLE_MAPS_API_KEY is empty")
 
 app = FastAPI()
 
@@ -35,8 +67,46 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
 async def root():
-    """Serves the index.html"""
-    return FileResponse(STATIC_DIR / "index.html")
+    """Serves the index.html with Google Maps API key injected"""
+    # Get the Google Maps API key from environment
+    google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
+    
+    # Log API key information (safely)
+    if google_maps_api_key:
+        masked_key = google_maps_api_key[:4] + "*" * (len(google_maps_api_key) - 8) + google_maps_api_key[-4:] if len(google_maps_api_key) > 8 else "****"
+        logger.info(f"Using Google Maps API key: {masked_key}")
+    else:
+        # List all environment variables that might contain the API key
+        potential_keys = [k for k in os.environ.keys() if 'API' in k or 'KEY' in k or 'GOOGLE' in k or 'MAP' in k]
+        logger.warning(f"No GOOGLE_MAPS_API_KEY found. Potential key variables: {potential_keys}")
+    
+    # Read the index.html file
+    index_path = STATIC_DIR / "index.html"
+    try:
+        with open(index_path, "r") as f:
+            html_content = f.read()
+            
+        # Replace the placeholder with the actual API key
+        if google_maps_api_key:
+            # Check if the placeholder exists in the HTML
+            if "YOUR_API_KEY" in html_content:
+                original_html = html_content
+                html_content = html_content.replace("YOUR_API_KEY", google_maps_api_key)
+                
+                # Verify replacement worked
+                if html_content != original_html:
+                    logger.info("Successfully injected Google Maps API key into index.html")
+                else:
+                    logger.warning("Failed to inject API key - no replacement occurred")
+            else:
+                logger.warning("Could not find 'YOUR_API_KEY' placeholder in index.html")
+        else:
+            logger.warning("No Google Maps API key found in environment variables")
+            
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error reading index.html: {str(e)}")
+        return FileResponse(index_path)  # Fallback to normal file serving
 
 # Location endpoints
 @app.post("/proxy/store_location")
@@ -201,7 +271,7 @@ async def sse_connect(request_id: str):
                                                 logger.info(f"Detected get_current_place call with ID: {current_function_id}")
                                             
                                             # Check for functionResponse to get_current_place
-                                            if (function_call_detected and 
+                                            elif (function_call_detected and 
                                                 part.get("functionResponse") and 
                                                 part["functionResponse"].get("id") == current_function_id):
                                                 
@@ -223,6 +293,31 @@ async def sse_connect(request_id: str):
                                                     # Replace the response
                                                     data["content"]["parts"][part_index]["functionResponse"]["response"] = new_response
                                                     logger.info(f"Replaced get_current_place response with browser location")
+                                            
+                                            # Check for functionResponse from show_place_details
+                                            elif (part.get("functionResponse") and 
+                                                part["functionResponse"].get("name") == "show_place_details"):
+                                                
+                                                # Get the original response
+                                                response = part["functionResponse"].get("response", {})
+                                                logger.info(f"Received show_place_details response: {response}")
+                                                
+                                                # If status is success and we have location data
+                                                if response.get("status") == "success" and response.get("location"):
+                                                    # Add a flag to indicate that this should trigger a map display in the frontend
+                                                    # We don't modify the actual data, just add the UI action flag
+                                                    response["ui_action"] = "show_map"
+                                                    
+                                                    # Log location data structure
+                                                    location = response.get("location", {})
+                                                    logger.info(f"Location data for map: lat={location.get('lat')}, lng={location.get('lng')}")
+                                                    
+                                                    # Replace the response
+                                                    data["content"]["parts"][part_index]["functionResponse"]["response"] = response
+                                                    logger.info(f"Enhanced show_place_details response for UI rendering")
+                                                else:
+                                                    # Log the issue with the response
+                                                    logger.warning(f"Invalid show_place_details response: status={response.get('status')}, location={response.get('location')}")
                                     
                                     # Convert back to JSON and format as SSE data
                                     updated_chunk = f"data: {json.dumps(data)}\n\n"
@@ -288,6 +383,31 @@ def intercept_function_calls(response_data):
                     # Replace the response
                     event["content"]["parts"][part_index]["functionResponse"]["response"] = new_response
                     logger.info(f"Replaced get_current_place response with browser location")
+            
+            # Check for functionResponse from show_place_details
+            elif (part.get("functionResponse") and 
+                  part["functionResponse"].get("name") == "show_place_details"):
+                
+                # Get the original response
+                response = part["functionResponse"].get("response", {})
+                logger.info(f"Received show_place_details response: {response}")
+                
+                # If status is success and we have location data
+                if response.get("status") == "success" and response.get("location"):
+                    # Add a flag to indicate that this should trigger a map display in the frontend
+                    # We don't modify the actual data, just add the UI action flag
+                    response["ui_action"] = "show_map"
+                    
+                    # Log location data structure
+                    location = response.get("location", {})
+                    logger.info(f"Location data for map: lat={location.get('lat')}, lng={location.get('lng')}")
+                    
+                    # Replace the response
+                    event["content"]["parts"][part_index]["functionResponse"]["response"] = response
+                    logger.info(f"Enhanced show_place_details response for UI rendering")
+                else:
+                    # Log the issue with the response
+                    logger.warning(f"Invalid show_place_details response: status={response.get('status')}, location={response.get('location')}")
                 
     return response_data
 

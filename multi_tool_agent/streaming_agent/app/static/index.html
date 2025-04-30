@@ -10,6 +10,45 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.5/dist/purify.min.js"></script>
     <!-- Import Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Add Google Maps JavaScript API -->
+    <script>
+        // Flag to track if API loaded successfully
+        window.mapsApiLoaded = false;
+        
+        // This function will be called when the API is loaded
+        function initGoogleMapsAPI() {
+            console.log('Google Maps API loaded successfully');
+            window.mapsApiLoaded = true;
+        }
+        
+        // Handle API loading errors
+        function handleMapsApiError() {
+            console.error('Google Maps API failed to load');
+            // Create a div to show the error
+            const errorDiv = document.createElement('div');
+            errorDiv.style.background = '#ffebee';
+            errorDiv.style.color = '#d32f2f';
+            errorDiv.style.padding = '15px';
+            errorDiv.style.borderRadius = '5px';
+            errorDiv.style.margin = '10px 0';
+            errorDiv.style.textAlign = 'center';
+            errorDiv.innerHTML = '<h3>Maps API Error</h3><p>The Google Maps API failed to load. This might be due to an invalid API key. Check the console for more details.</p>';
+            
+            // Insert at top of body
+            document.body.insertBefore(errorDiv, document.body.firstChild);
+        }
+    </script>
+    <!-- Google Maps API script with placeholder API key that will be replaced by the server -->
+    <script async
+        src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initGoogleMapsAPI"
+        onerror="handleMapsApiError()">
+    </script>
+    <!-- Add Google Maps Web Components scripts -->
+    <script type="module">
+        import { MapElement } from "https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&v=beta&components=map"
+        import { PlaceDetailsElement } from "https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&v=beta&components=place_details"
+        import { AdvancedMarkerElement } from "https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&v=beta&components=advanced_marker"
+    </script>
     <script>
         // Configure marked.js
         document.addEventListener('DOMContentLoaded', function() {
@@ -449,6 +488,136 @@
                 width: 100%;
             }
         }
+        
+        /* Map modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.6);
+            animation: fadeIn 0.3s;
+        }
+        
+        .modal.show {
+            display: block;
+        }
+        
+        .modal-content {
+            background-color: var(--card-bg);
+            margin: 5% auto;
+            border-radius: var(--radius-md);
+            width: 80%;
+            max-width: 900px;
+            box-shadow: var(--shadow-md);
+            animation: slideIn 0.4s;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .modal-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--primary-color);
+        }
+        
+        .close-modal {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .close-modal:hover {
+            color: var(--primary-color);
+        }
+        
+        .modal-body {
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        
+        #place-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        #map-container {
+            width: 100%;
+            height: 400px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        #place-info {
+            margin-bottom: 1rem;
+        }
+        
+        #place-address {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        
+        #place-rating {
+            margin-bottom: 0.5rem;
+            color: var(--primary-color);
+        }
+        
+        #place-website {
+            margin-bottom: 0.5rem;
+        }
+        
+        #place-website a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+        
+        #place-website a:hover {
+            text-decoration: underline;
+        }
+        
+        #place-phone {
+            color: var(--text-secondary);
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+    
+    <!-- Additional styles for the new session button -->
+    <style>
+        .small-button {
+            font-size: 0.8rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(45deg, var(--secondary-color), var(--primary-light));
+            margin-left: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -477,6 +646,7 @@
                     <span class="toggle-slider"></span>
                 </label>
             </label>
+            <button onclick="createNewSession()" id="new-session-btn" class="small-button">New Session</button>
         </div>
         <div id="chat-container"></div>
         <div id="input-container">
@@ -490,9 +660,56 @@
         const API_URL = window.location.origin;
         const APP_NAME = 'deep_tAIpei';
         const USER_ID = 'u_123';
-        const SESSION_ID = 's_123';
+        let SESSION_ID = generateSessionId();
         let sessionCreated = false;
         let activeResponseId = null; // Track the current response message for streaming
+
+        // Generate a random session ID
+        function generateSessionId() {
+            // Generate a random string with timestamp to ensure uniqueness
+            const timestamp = new Date().getTime();
+            const random = Math.random().toString(36).substring(2, 15);
+            return `s_${timestamp}_${random}`;
+        }
+
+        // Save session ID to local storage
+        function saveSessionId(sessionId) {
+            localStorage.setItem('taipeiGuideSessionId', sessionId);
+        }
+
+        // Load session ID from local storage
+        function loadSessionId() {
+            const savedId = localStorage.getItem('taipeiGuideSessionId');
+            return savedId || generateSessionId();
+        }
+
+        // Initialize from local storage if available
+        document.addEventListener('DOMContentLoaded', function() {
+            SESSION_ID = loadSessionId();
+            
+            // Show current session ID in a debug message if debug is enabled
+            const debugToggle = document.getElementById('debug-toggle');
+            if (debugToggle && debugToggle.checked) {
+                console.log(`Current session ID: ${SESSION_ID}`);
+            }
+        });
+
+        // Create a brand new session (can be called anytime)
+        function createNewSession() {
+            // Generate a new session ID
+            SESSION_ID = generateSessionId();
+            saveSessionId(SESSION_ID);
+            
+            // Reset the UI
+            const chatContainer = document.getElementById('chat-container');
+            if (chatContainer) {
+                chatContainer.innerHTML = '';
+            }
+            
+            // Call createSession to establish a new session
+            sessionCreated = false;
+            createSession();
+        }
 
         // Location tracking
         let userLocation = null;
@@ -596,6 +813,9 @@
                 createSessionBtn.disabled = true;
                 addMessage('Creating new session...', 'system');
                 
+                // Show the current session ID in debug view
+                addMessage(`Session ID: ${SESSION_ID}`, 'system');
+                
                 const response = await fetch(`${API_URL}/proxy/session/${APP_NAME}/${USER_ID}/${SESSION_ID}`, {
                     method: 'POST',
                     headers: {
@@ -608,6 +828,9 @@
                         }
                     })
                 });
+                
+                // Save successful session ID to local storage
+                saveSessionId(SESSION_ID);
                 
                 const responseData = await response.json();
                 console.log('Session creation response:', responseData);
@@ -881,7 +1104,7 @@
                     let messageElement = null;
                     let finalText = '';
                     
-                    eventSource.onmessage = (event) => {
+                    eventSource.onmessage = async (event) => {
                         // Skip empty events
                         if (!event.data.trim()) return;
                         
@@ -920,6 +1143,24 @@
                                     if (part.functionResponse) {
                                         const functionName = part.functionResponse.name;
                                         const response = part.functionResponse.response;
+                                        
+                                        // Check if this is a place details response
+                                        if (functionName === 'show_place_details') {
+                                            // Use a self-executing async function to use await
+                                            (async () => {
+                                                if (await handlePlaceDetailsResponse(response)) {
+                                                    // If handled, update the message to indicate a map is being shown
+                                                    finalText = `Showing ${response.name || 'place'} on a map`;
+                                                    
+                                                    if (!messageElement) {
+                                                        messageElement = addMessage(finalText, 'agent', data.id);
+                                                    } else {
+                                                        messageElement.innerHTML = processText(finalText);
+                                                    }
+                                                }
+                                            })();
+                                            continue;
+                                        }
                                         
                                         if (response.report) {
                                             finalText = `Got data from ${functionName}: ${response.report}`;
@@ -1061,6 +1302,26 @@
                             // Check if this is a model's text response
                             if (event.content && event.content.parts) {
                                 for (const part of event.content.parts) {
+                                    // Check for place details response first
+                                    if (part.functionResponse && 
+                                        part.functionResponse.name === 'show_place_details') {
+                                        const response = part.functionResponse.response;
+                                        
+                                        // Use async/await with an IIFE
+                                        (async () => {
+                                            if (await handlePlaceDetailsResponse(response)) {
+                                                // Add a message indicating place is showing on map
+                                                const msgElement = addMessage(
+                                                    `Showing ${response.name || 'place'} on a map`, 
+                                                    'agent'
+                                                );
+                                                addDebugInfo(msgElement, event);
+                                            }
+                                        })();
+                                        continue;
+                                    }
+                                    
+                                    // Regular text response
                                     if (part.text) {
                                         const msgElement = addMessage(part.text, 'agent');
                                         addDebugInfo(msgElement, event);
@@ -1099,7 +1360,347 @@
                     el.style.display = e.target.checked ? 'block' : 'none';
                 });
             });
+            
+            // Initialize map modal events
+            initMapModal();
         });
+        
+        // Map and place details handling
+        let map = null;
+        let placeMarker = null;
+        let placesService = null;
+        
+        function initMapModal() {
+            // Set up modal close button
+            const closeButton = document.querySelector('.close-modal');
+            if (closeButton) {
+                closeButton.addEventListener('click', closeMapModal);
+            }
+            
+            // Close modal when clicking outside
+            window.addEventListener('click', (e) => {
+                const modal = document.getElementById('map-modal');
+                if (e.target === modal) {
+                    closeMapModal();
+                }
+            });
+            
+            // Close with escape key
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeMapModal();
+                }
+            });
+        }
+        
+        function showMapModal() {
+            const modal = document.getElementById('map-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('show');
+        }
+        
+        function closeMapModal() {
+            const modal = document.getElementById('map-modal');
+            modal.classList.remove('show');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+        
+        async function initializeMap(placeId, lat, lng) {
+            // Check if map already initialized
+            const mapContainer = document.getElementById('map');
+            
+            // Check if Google Maps API is loaded
+            if (typeof google === 'undefined' || !window.mapsApiLoaded) {
+                console.error('Google Maps API not loaded properly');
+                
+                // Show error message in map container
+                mapContainer.innerHTML = '<div style="padding: 20px; color: #d63031; text-align: center;">' +
+                    '<p>Unable to load Google Maps.</p>' +
+                    '<p>Please check your internet connection and API key.</p>' +
+                    '<p><strong>Error:</strong> Maps API is not available.</p></div>';
+                
+                // Show the modal anyway so user can see error
+                showMapModal();
+                return false;
+            }
+            
+            try {
+                // Show modal first
+                showMapModal();
+                
+                // Initialize map if needed
+                if (!map) {
+                    // Center coordinates (default to Taipei)
+                    const center = { lat: lat || 25.033, lng: lng || 121.565 };
+                    
+                    // Create the map
+                    map = new google.maps.Map(mapContainer, {
+                        center: center,
+                        zoom: 16,
+                        mapTypeControl: false,
+                        fullscreenControl: true,
+                        streetViewControl: true,
+                        zoomControl: true
+                    });
+                    
+                    // Initialize the Places service
+                    placesService = new google.maps.places.PlacesService(map);
+                }
+                
+                // If we have a place ID, get details and display them
+                if (placeId) {
+                    console.log('Getting details for Place ID:', placeId);
+                    
+                    // Request place details
+                    const request = {
+                        placeId: placeId,
+                        fields: ['name', 'formatted_address', 'geometry', 'rating', 
+                                'website', 'formatted_phone_number', 'photos', 'types',
+                                'opening_hours', 'price_level', 'user_ratings_total']
+                    };
+                    
+                    // Get place details
+                    placesService.getDetails(request, (place, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK && place) {
+                            // Display place details
+                            displayPlaceInfo(place);
+                            
+                            // Center map on place location
+                            map.setCenter(place.geometry.location);
+                            
+                            // Add a marker for the place
+                            if (placeMarker) {
+                                placeMarker.setPosition(place.geometry.location);
+                            } else {
+                                placeMarker = new google.maps.Marker({
+                                    position: place.geometry.location,
+                                    map: map,
+                                    animation: google.maps.Animation.DROP
+                                });
+                            }
+                        } else {
+                            console.error('Error fetching place details:', status);
+                            document.getElementById('place-address').textContent = 'Error fetching place details';
+                        }
+                    });
+                }
+                // Or if we just have coordinates, display them
+                else if (lat && lng) {
+                    const latLng = new google.maps.LatLng(lat, lng);
+                    map.setCenter(latLng);
+                    
+                    // Add a marker
+                    if (placeMarker) {
+                        placeMarker.setPosition(latLng);
+                    } else {
+                        placeMarker = new google.maps.Marker({
+                            position: latLng,
+                            map: map,
+                            animation: google.maps.Animation.DROP
+                        });
+                    }
+                    
+                    // Try to get place info from reverse geocoding
+                    const geocoder = new google.maps.Geocoder();
+                    geocoder.geocode({ location: latLng }, (results, status) => {
+                        if (status === "OK" && results[0]) {
+                            document.getElementById('place-address').textContent = results[0].formatted_address;
+                        } else {
+                            document.getElementById('place-address').textContent = `Location: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+                        }
+                    });
+                }
+                
+                return true;
+            } catch (e) {
+                console.error('Error initializing map:', e);
+                
+                // Show error message in map container
+                mapContainer.innerHTML = '<div style="padding: 20px; color: #d63031; text-align: center;">' +
+                    '<p>Error initializing map: ' + e.message + '</p>' +
+                    '<p>Please check the console for more details.</p></div>';
+                
+                return false;
+            }
+        }
+        
+        function displayPlaceInfo(place) {
+            // Set place name
+            document.getElementById('place-name').textContent = place.name || 'Place Details';
+            
+            // Set address
+            document.getElementById('place-address').textContent = place.formatted_address || '';
+            
+            // Set rating with stars
+            let ratingHTML = '';
+            if (place.rating) {
+                ratingHTML = `Rating: ${place.rating} / 5 `;
+                const fullStars = Math.floor(place.rating);
+                const halfStar = place.rating % 1 >= 0.5;
+                
+                for (let i = 0; i < fullStars; i++) {
+                    ratingHTML += '★';
+                }
+                if (halfStar) {
+                    ratingHTML += '½';
+                }
+                
+                // Add total ratings count if available
+                if (place.user_ratings_total) {
+                    ratingHTML += ` (${place.user_ratings_total} reviews)`;
+                }
+            }
+            document.getElementById('place-rating').innerHTML = ratingHTML;
+            
+            // Set website
+            if (place.website) {
+                document.getElementById('place-website').innerHTML = 
+                    `<a href="${place.website}" target="_blank" rel="noopener">Visit Website</a>`;
+            } else {
+                document.getElementById('place-website').innerHTML = '';
+            }
+            
+            // Set phone
+            if (place.formatted_phone_number) {
+                document.getElementById('place-phone').textContent = `Phone: ${place.formatted_phone_number}`;
+            } else {
+                document.getElementById('place-phone').textContent = '';
+            }
+        }
+        
+        async function displayPlaceDetails(placeData) {
+            console.log('Displaying place details:', placeData);
+            
+            if (!placeData) {
+                console.error('Invalid place data');
+                return;
+            }
+            
+            // Update modal title
+            document.getElementById('place-name').textContent = placeData.name || 'Place Details';
+            
+            try {
+                // If we have a place ID, use that for better details
+                if (placeData.place_id) {
+                    console.log('Displaying place with ID:', placeData.place_id);
+                    await initializeMap(placeData.place_id, null, null);
+                }
+                // Otherwise fall back to coordinates
+                else if (placeData.location && placeData.location.lat && placeData.location.lng) {
+                    console.log('Displaying place with coordinates:', placeData.location);
+                    
+                    // Display the location info 
+                    document.getElementById('place-address').textContent = placeData.address || '';
+                    
+                    // Set rating
+                    let ratingHTML = '';
+                    if (placeData.rating) {
+                        ratingHTML = `Rating: ${placeData.rating} / 5 `;
+                        const fullStars = Math.floor(placeData.rating);
+                        const halfStar = placeData.rating % 1 >= 0.5;
+                        
+                        for (let i = 0; i < fullStars; i++) {
+                            ratingHTML += '★';
+                        }
+                        if (halfStar) {
+                            ratingHTML += '½';
+                        }
+                    }
+                    document.getElementById('place-rating').innerHTML = ratingHTML;
+                    
+                    // Set website
+                    if (placeData.website) {
+                        document.getElementById('place-website').innerHTML = 
+                            `<a href="${placeData.website}" target="_blank" rel="noopener">Visit Website</a>`;
+                    } else {
+                        document.getElementById('place-website').innerHTML = '';
+                    }
+                    
+                    // Set phone
+                    if (placeData.phone) {
+                        document.getElementById('place-phone').textContent = `Phone: ${placeData.phone}`;
+                    } else {
+                        document.getElementById('place-phone').textContent = '';
+                    }
+                    
+                    await initializeMap(null, placeData.location.lat, placeData.location.lng);
+                }
+                else {
+                    console.error('No valid place ID or coordinates found in place data');
+                    showMapModal(); // Show modal anyway with an error
+                    const mapContainer = document.getElementById('map-container');
+                    mapContainer.innerHTML = '<div style="padding: 20px; color: #d63031; text-align: center;">' +
+                        '<p>Unable to display place: no valid location data.</p></div>';
+                }
+            } catch (error) {
+                console.error('Error displaying place details:', error);
+                showMapModal(); // Show modal anyway with an error
+                const mapContainer = document.getElementById('map-container');
+                mapContainer.innerHTML = '<div style="padding: 20px; color: #d63031; text-align: center;">' +
+                    '<p>Error displaying place details: ' + error.message + '</p></div>';
+            }
+        }
+        
+        // Function to handle place details response from the AI
+        async function handlePlaceDetailsResponse(response) {
+            console.log('Received place details response:', response);
+            
+            if (!response) {
+                console.error('Empty response received in handlePlaceDetailsResponse');
+                return false;
+            }
+            
+            if (response.status !== 'success') {
+                console.error('Place details response status:', response.status);
+                return false;
+            }
+            
+            if (!response.ui_action) {
+                console.error('Missing ui_action flag in place details response');
+                return false;
+            }
+            
+            if (response.status === 'success' && 
+                response.ui_action === 'show_map') {
+                
+                // Display place details on map
+                try {
+                    await displayPlaceDetails(response);
+                    return true;
+                } catch (e) {
+                    console.error('Error displaying place details:', e);
+                    return false;
+                }
+            }
+            
+            console.log('Place details response did not meet criteria for map display');
+            return false;
+        }
     </script>
+
+    <!-- Add map modal container -->
+    <div id="map-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="place-name">Place Details</h2>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="place-info">
+                    <!-- Place details will be inserted here -->
+                    <div id="place-address"></div>
+                    <div id="place-rating"></div>
+                    <div id="place-website"></div>
+                    <div id="place-phone"></div>
+                </div>
+                <div id="map-container">
+                    <!-- Map will be inserted here -->
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

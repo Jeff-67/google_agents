@@ -238,6 +238,108 @@ def get_place_details(
             "error_message": f"An error occurred while getting place details: {str(e)}"
         }
 
+def show_place_details(
+    place_id: str = "",
+    place_name: str = "",
+    tool_context: ToolContext = None,
+) -> dict:
+    """Prepares place details for display on a map in the web interface.
+    
+    This function retrieves detailed place information and formats it for
+    display in the web UI. It returns a structured response that can be
+    used by the frontend to render a map with place details.
+    
+    Args:
+        place_id: The Google Maps place ID. If provided, this takes precedence.
+        place_name: The name of the place to show. Used to look up place_id if not provided directly.
+        tool_context: The ADK tool context containing stored place information.
+        
+    Returns:
+        dict: A dictionary containing the place details with a 'status' key ('success' or 'error'),
+        'place_id', 'name', 'location' (lat/lng), and other details if successful,
+        or an 'error_message' if an error occurred.
+    """
+    try:
+        # If place_id is not provided directly, try to find it from place_name
+        if not place_id and place_name:
+            if not tool_context or "places" not in tool_context.state:
+                return {
+                    "status": "error",
+                    "error_message": "No places found in memory. Please search for places first."
+                }
+                
+            # Find the place_id for the given place_name
+            for pid, pname in tool_context.state["places"]:
+                if pname.lower() == place_name.lower():
+                    place_id = pid
+                    break
+                    
+        if not place_id:
+            return {
+                "status": "error",
+                "error_message": f"Could not find place ID for '{place_name}'. Please provide a valid place."
+            }
+            
+        # Get the place details using the existing get_place_details function
+        # We'll request only valid fields needed for a good map display
+        fields = [
+            "name", "formatted_address", "geometry", "rating",  
+            "opening_hours", "website", "formatted_phone_number", 
+            "price_level", "photo"
+        ]
+        
+        gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
+        place_details = gmaps.place(
+            place_id=place_id,
+            fields=fields,
+            language="en"
+        )
+        
+        if place_details and place_details.get("status") == "OK":
+            result = place_details.get("result", {})
+            
+            # Extract and format the location data
+            location = None
+            if "geometry" in result and "location" in result["geometry"]:
+                location = {
+                    "lat": float(result["geometry"]["location"]["lat"]),
+                    "lng": float(result["geometry"]["location"]["lng"])
+                }
+                
+            # Process photos if available
+            photos = []
+            if "photos" in result:
+                for photo in result["photos"][:3]:  # Limit to 3 photos
+                    if "photo_reference" in photo:
+                        photos.append(photo["photo_reference"])
+            
+            # Return a structured response suitable for map display
+            return {
+                "status": "success",
+                "place_id": place_id,
+                "name": result.get("name", ""),
+                "address": result.get("formatted_address", ""),
+                "location": location,
+                "rating": result.get("rating"),
+                "types": result.get("type", []),  # Changed from 'types' to 'type'
+                "opening_hours": result.get("opening_hours", {}),
+                "website": result.get("website", ""),
+                "phone": result.get("formatted_phone_number", ""),
+                "price_level": result.get("price_level"),
+                "photos": photos,
+                "action": "show_on_map"  # Signal to the frontend to display this on a map
+            }
+        else:
+            return {
+                "status": "error",
+                "error_message": f"Failed to get place details. Status: {place_details.get('status')}"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_message": f"An error occurred while preparing place details for display: {str(e)}"
+        }
+
 find_places_nearby_agent = Agent(
     name="find_places_nearby_agent",
     model="gemini-2.0-flash-001",
@@ -250,6 +352,8 @@ find_places_nearby_agent = Agent(
                 "If the tool returns an error, inform the user politely. "
                 "If the tool is successful, present the places in a clear, "
                 "organized manner with relevant details like name, address, "
-                "rating, and price level.",
-    tools=[find_places_nearby],
+                "rating, and price level. "
+                "When a user wants to see more details about a specific place, "
+                "use the 'show_place_details' tool to display it on a map.",
+    tools=[find_places_nearby, get_place_details, show_place_details],
 )
