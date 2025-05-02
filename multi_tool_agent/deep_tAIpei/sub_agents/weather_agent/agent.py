@@ -4,8 +4,8 @@ import json
 from google.adk.agents import Agent
 
 from deep_tAIpei.tools.place import get_current_place
-from deep_tAIpei.tools.search import google_search_agent
 from deep_tAIpei.shared_libraries.constants import FAST_GEMINI_MODEL
+from .prompt import WEATHER_AGENT_INSTRUCTION
 
 def google_weather_api(latitude: float, longitude: float, hours: int = 24):
     """
@@ -42,12 +42,7 @@ weather_agent = Agent(
     name="weather_agent",
     model=FAST_GEMINI_MODEL,
     description="Agent to find the weather information for a specific city.",
-    instruction="You are a helpful weather assistant. "
-                "1. Weather Information: "
-                "   - Use 'google_weather_api' to get precise weather data when latitude and longitude are known "
-                "   - Use 'get_current_place' tool to find the current location including latitude and longitude "
-                "   - You can extract latitude and longitude from get_current_place response and pass them to google_weather_api "
-                "   - If no city is specified, first use 'get_current_place' tool to find the current location and then use 'google_weather_api' to find weather for that location ",
+    instruction=WEATHER_AGENT_INSTRUCTION,
     tools=[get_current_place, google_weather_api],
 )
 

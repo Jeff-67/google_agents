@@ -3,7 +3,6 @@
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
 
-
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -13,6 +12,8 @@ from deep_tAIpei.sub_agents.place_recommendation_agent.agent import place_recomm
 from deep_tAIpei.tools.search import google_search_agent
 
 from deep_tAIpei.shared_libraries.constants import FAST_GEMINI_MODEL
+
+# Load environment variables
 env_path = Path(__file__).parent / '.env'
 load_dotenv(env_path)
 

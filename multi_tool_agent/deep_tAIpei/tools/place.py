@@ -1,18 +1,25 @@
 import os
+import time  # Add time module for timestamp comparison
+import requests
 import googlemaps
 from google.adk.agents import Agent
 from google.adk.tools import ToolContext
 
-def get_current_place(source: str = "device") -> dict:
-    """Finds the current place using the Google Maps Geolocation API.
+
+def get_current_place(tool_context: ToolContext, source: str = "device") -> dict:
+    """Finds the current place using the Google Maps Geolocation API or state cache.
     
     This function can determine location from different sources:
     - "device": Uses the device's cell tower and WiFi information (requires client-side execution)
     - "server": Uses the server's IP address (less accurate for end users)
     - "browser": Uses the browser's IP address (requires client-side execution)
     - "auto": Tries device first, then falls back to IP-based location
+    
+    The function will first check if a recent location exists in the state cache
+    (less than 5 minutes old) before making an API call.
 
     Args:
+        tool_context: The tool context containing session state
         source: Where to get the location from. One of: "device", "server", "browser", "auto"
                Defaults to "device" for most accurate results.
 
@@ -21,6 +28,20 @@ def get_current_place(source: str = "device") -> dict:
         and a 'coordinates' key with lat/lng if successful, or an 'error_message' if an error occurred.
     """
     try:
+        # Check if location exists in state and has timestamp
+        current_location = tool_context.state.get("current_location")
+        location_timestamp = tool_context.state.get("current_location_timestamp")
+        
+        # If we have location and it's recent enough (less than 5 minutes old), use it
+        if (current_location and location_timestamp and 
+            (time.time() - location_timestamp) < 300):  # 300 seconds = 5 minutes
+            return {
+                "status": "success",
+                "coordinates": current_location,
+                "source": "cache"
+            }
+            
+        # Otherwise, get fresh location via API
         gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
         
         # Prepare the geolocation request parameters
@@ -40,7 +61,13 @@ def get_current_place(source: str = "device") -> dict:
                 
             # Get the coordinates and accuracy from geolocation result
             location = geolocation_result["location"]
-            accuracy = geolocation_result.get("accuracy", 0)  # Default to 0 if not provided
+            
+            # Store the coordinates and timestamp in tool context
+            tool_context.state["current_location"] = {
+                "lat": location["lat"],
+                "lng": location["lng"]
+            }
+            tool_context.state["current_location_timestamp"] = time.time()
             
             return {
                 "status": "success",
@@ -48,7 +75,6 @@ def get_current_place(source: str = "device") -> dict:
                     "lat": location["lat"],
                     "lng": location["lng"]
                 },
-                "accuracy": accuracy,
                 "source": source
             }
         except Exception as e:
@@ -64,9 +90,253 @@ def get_current_place(source: str = "device") -> dict:
             "error_message": f"An error occurred while finding the current place: {str(e)}"
         }
 
+def get_specific_place(tool_context: ToolContext, place_name: str, query_params: dict = None) -> dict:
+    """Finds information about a specific place by name using Google Maps Text Search API.
+    
+    This function can be used both to get coordinates for a place name and to search
+    for places related to a specific location.
+    
+    Args:
+        tool_context: The tool context containing session state
+        place_name: The name of the place to find (e.g., "Taipei 101", "New York City")
+        query_params: Optional additional parameters for the search query
+        
+    Returns:
+        dict: A dictionary containing the place information with a 'status' key ('success' or 'error') 
+        and either detailed results or an error message.
+    """
+    try:
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            return {
+                "status": "error",
+                "error_message": "Google Maps API key not found in environment variables."
+            }
+            
+        url = "https://places.googleapis.com/v1/places:searchText"
+        
+        # Start with basic query parameters
+        payload = {
+            "textQuery": place_name
+        }
+
+        # Add any additional parameters provided
+        if query_params:
+            payload.update(query_params)
+        
+        # Set up the headers - request all useful fields
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": api_key,
+            "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,nextPageToken"
+        }
+        
+        # Make the request
+        response = requests.post(url, json=payload, headers=headers)
+        
+        # Check if the request was successful
+        if response.status_code != 200:
+            return {
+                "status": "error",
+                "error_message": f"Failed to find place: HTTP {response.status_code}, {response.text}"
+            }
+            
+        # Parse the response
+        result = response.json()
+        
+        # Check if any places were found
+        if not result.get("places"):
+            return {
+                "status": "error",
+                "error_message": f"No places found matching '{place_name}'."
+            }
+            
+        # For place search, return all the places with properly formatted data
+        places = []
+        for place in result["places"]:
+            # Extract place ID from the resource name (format: "places/PLACE_ID")
+            place_id = place.get("id") or place.get("name", "").replace("places/", "")
+            display_name = place.get("displayName", {}).get("text", "Unknown")
+            
+            place_info = {
+                "name": display_name,
+                "address": place.get("formattedAddress", ""),
+                "rating": place.get("rating"),
+                "price_level": place.get("priceLevel"),
+                "types": place.get("types", []),
+                "place_id": place_id
+            }
+            places.append(place_info)
+        
+
+        return {
+            "status": "success",
+            "results": places,
+            "next_page_token": result.get("nextPageToken")
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_message": f"An error occurred while finding information for '{place_name}': {str(e)}"
+        }
+
+def store_place_data(places: list, tool_context: ToolContext = None) -> list:
+    """Store place ID and name pairs in tool context and return the formatted list.
+    
+    This is a helper function used by find_places_nearby to extract and store
+    place information for use by other functions.
+    
+    Args:
+        places: List of place dictionaries containing at least "place_id" and "name" keys
+        tool_context: The tool context for storing state
+        
+    Returns:
+        list: List of tuples containing (place_id, place_name) pairs
+    """
+    if not places:
+        return []
+        
+    place_tuples = []
+    
+    # Extract place ID and name pairs
+    for place in places:
+        place_id = place.get("place_id")
+        name = place.get("name")
+        
+        if place_id and name:
+            place_tuples.append((place_id, name))
+    
+    # Store in tool context if provided
+    if tool_context and place_tuples:
+        tool_context.state["places"] = place_tuples
+        
+    return place_tuples
+
+def _get_places_by_coordinates(coordinates, search_params):
+    """Helper function to search for places by coordinates using Places Nearby API.
+    
+    This function makes a request to the Google Places Nearby API using the provided
+    coordinates and search parameters. It processes the API response and formats the
+    results into a consistent structure.
+    
+    Args:
+        coordinates: Dictionary with lat/lng keys representing the center point for the search
+        search_params: Dictionary with search parameters including radius, keyword, types, etc.
+        
+    Returns:
+        tuple: Contains three elements:
+            - status_code: "success" or "error"
+            - places_list: List of place dictionaries or error message string if status is "error"
+            - next_page_token: Token for pagination or None if no more results
+    """
+    try:
+        gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
+        results = gmaps.places_nearby(
+            location=coordinates,
+            **search_params
+        )
+        
+        if results and results["status"] == "OK":
+            places = []
+            for place in results["results"]:
+                place_info = {
+                    "name": place.get("name"),
+                    "address": place.get("vicinity"),
+                    "rating": place.get("rating"),
+                    "price_level": place.get("price_level"),
+                    "types": place.get("types", []),
+                    "place_id": place.get("place_id")
+                }
+                places.append(place_info)
+            
+            return "success", places, results.get("next_page_token")
+        else:
+            return "error", f"No places found. Status: {results.get('status')}", None
+    except Exception as e:
+        return "error", f"API error: {str(e)}", None
+
+def _prepare_search_params(radius, keyword, language, min_price, max_price, name, open_now, rank_by, type, page_token):
+    """Prepare search parameters for Places API.
+    
+    This function takes individual search parameters and organizes them into a properly
+    formatted dictionary for use with the Google Places API. It filters out None values
+    and empty strings to ensure a clean parameter set.
+    
+    Args:
+        radius: Distance in meters within which to search
+        keyword: Term to match against place content
+        language: Language code for results (e.g., "en" for English)
+        min_price: Minimum price level (0-4)
+        max_price: Maximum price level (0-4)
+        name: Terms to match against place names
+        open_now: Boolean for returning only places that are currently open
+        rank_by: Method for ranking results ("prominence" or "distance")
+        type: Specific place type to filter results
+        page_token: Token for retrieving next page of results
+        
+    Returns:
+        dict: Parameters ready for API call with all None and empty values removed
+    """
+    params = {
+        "radius": radius,
+        "keyword": keyword,
+        "language": language,
+        "min_price": min_price,
+        "max_price": max_price,
+        "open_now": open_now,
+        "rank_by": rank_by,
+        "page_token": page_token,
+    }
+    
+    if name:
+        params["name"] = name
+    
+    if type:
+        params["type"] = type
+        
+    # Remove None values and empty strings
+    return {k: v for k, v in params.items() if v or v == 0}
+
+def _convert_price_levels(min_price, max_price):
+    """Convert numeric price levels to Google's format.
+    
+    This function translates the 0-4 price level range used in the function parameters
+    to the string format expected by the Google Places API (Text Search).
+    
+    Args:
+        min_price: Minimum price level (0-4)
+            0: Free
+            1: Inexpensive
+            2: Moderate
+            3: Expensive
+            4: Very Expensive
+        max_price: Maximum price level (0-4)
+        
+    Returns:
+        list: List of Google's price level string identifiers within the specified range
+              Returns empty list if default range (0-4) is specified
+    """
+    if min_price == 0 and max_price == 4:
+        return []  # Default range, no need to specify
+        
+    price_level_map = {
+        0: "PRICE_LEVEL_FREE",
+        1: "PRICE_LEVEL_INEXPENSIVE", 
+        2: "PRICE_LEVEL_MODERATE",
+        3: "PRICE_LEVEL_EXPENSIVE",
+        4: "PRICE_LEVEL_VERY_EXPENSIVE"
+    }
+    
+    price_levels = []
+    for i in range(min_price, max_price + 1):
+        if i in price_level_map:
+            price_levels.append(price_level_map[i])
+            
+    return price_levels
+
 def find_places_nearby(
-    location: dict = {},  # Empty dict will trigger current location lookup
-    radius: int = 1000,  # Default to 1km radius
+    location: str = "current_location",
+    radius: int = 2000,  # Increased from 1000 to 2000 meters for more comprehensive results
     keyword: str = "",
     language: str = "en",
     min_price: int = 0,
@@ -79,14 +349,27 @@ def find_places_nearby(
     tool_context: ToolContext = None,
 ) -> dict:
     """Finds nearby places using the Google Maps Places API and stores place information in memory.
+    
+    This function can search for places using two different approaches:
+    1. Using the device's current location with the Places Nearby API
+    2. Using a named location (e.g., "Taipei 101") with the Places Text Search API
+    
+    Results from either approach are stored in the tool context for later reference by
+    other functions like get_place_details() and show_place_details().
 
     Args:
-        location: Optional latitude/longitude value for which to find nearby places.
-                 If empty dict is provided, will use current location.
-        radius: Distance in meters within which to search (default: 1000)
+        location: String indicating location to use. 
+                 Use "current_location" to use device's current location,
+                 or provide a place name like "Taipei 101" or "New York City".
+        radius: Distance in meters within which to search (default: 2000)
         keyword: A term to match against place content
         language: The language for results (default: "en")
         min_price: Minimum price level (0-4)
+            0: Free
+            1: Inexpensive
+            2: Moderate
+            3: Expensive
+            4: Very Expensive
         max_price: Maximum price level (0-4)
         name: One or more terms to match against place names
         open_now: Whether to return only places open now
@@ -96,77 +379,144 @@ def find_places_nearby(
         tool_context: The ADK tool context for storing place information
 
     Returns:
-        dict: A dictionary containing the search results with a 'status' key ('success' or 'error') 
-        and a 'results' key with the places if successful, or an 'error_message' if an error occurred.
-        Each place in results includes basic info (name, address, rating, price_level, types, place_id).
-        Also stores tuples of (place_id, place_name) in tool_context.state["places"] for later reference.
+        dict: A dictionary containing the search results with:
+            - 'status': 'success' or 'error'
+            - 'results': List of places if successful, with each place containing:
+                * name: The place name
+                * address: The formatted address or vicinity
+                * rating: The average rating (0.0-5.0)
+                * price_level: The price level (0-4)
+                * types: List of place type categories
+                * place_id: The Google Places unique identifier
+            - 'next_page_token': Token for retrieving the next page of results
+            - 'error_message': Description of the error if status is 'error'
+            
+        Also stores tuples of (place_id, place_name) in tool_context.state["places"] for
+        later reference by other functions like get_place_details().
     """
     try:
-        # If location is empty, get current location
-        if not location:
-            current_place = get_current_place()
+        # Prepare common search parameters
+        search_params = _prepare_search_params(
+            radius, keyword, language, min_price, max_price, 
+            name, open_now, rank_by, type, page_token
+        )
+        
+        status = "error"
+        places = []
+        next_page_token = None
+        error_message = ""
+        
+        # Branch based on location parameter
+        if location == "current_location":
+            # Get current location coordinates
+            current_place = get_current_place(tool_context)
             if current_place["status"] == "error":
                 return {
                     "status": "error",
                     "error_message": f"Could not determine current location: {current_place['error_message']}"
                 }
-            # Use the coordinates from the current_place response
-            location = current_place["coordinates"]
-
-        gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
-        results = gmaps.places_nearby(
-            location=location,
-            radius=radius,
-            keyword=keyword,
-            language=language,
-            min_price=min_price,
-            max_price=max_price,
-            name=name,
-            open_now=open_now,
-            rank_by=rank_by,
-            type=type,
-            page_token=page_token,
-        )
-
-        if results and results["status"] == "OK":
-            places = []
-            place_tuples = []  # List to store (place_id, place_name) tuples
             
-            for place in results["results"]:
-                # Get basic place info
-                place_info = {
-                    "name": place.get("name"),
-                    "address": place.get("vicinity"),
-                    "rating": place.get("rating"),
-                    "price_level": place.get("price_level"),
-                    "types": place.get("types", []),
-                    "place_id": place.get("place_id")
-                }
-                places.append(place_info)
+            # Search for places near coordinates
+            status, result, next_page_token = _get_places_by_coordinates(
+                current_place["coordinates"], 
+                search_params
+            )
+            
+            if status == "success":
+                places = result
+            else:
+                error_message = f"No places found near your current location. {result}"
                 
-                # Store tuple for later reference
-                if place_info["place_id"] and place_info["name"]:
-                    place_tuples.append((place_info["place_id"], place_info["name"]))
-
-            # Store place tuples in tool context
-            if tool_context:
-                tool_context.state["places"] = place_tuples
-
+        else:
+            # Build text search query
+            query = location
+            if keyword:
+                query = f"{keyword} in {location}"
+            if name:
+                query = f"{name} {query}"
+                
+            # Prepare query parameters for text search
+            query_params = {
+                "languageCode": language,
+                "openNow": open_now
+            }
+            
+            # Add price levels if specified
+            price_levels = _convert_price_levels(min_price, max_price)
+            if price_levels:
+                query_params["priceLevels"] = price_levels
+            
+            # Add type and page token if specified
+            if type:
+                query_params["includedType"] = type
+            if page_token:
+                query_params["pageToken"] = page_token
+            
+            # Perform the text search
+            place_result = get_specific_place(tool_context, query, query_params)
+            
+            # Process results
+            if place_result["status"] == "success":
+                places = place_result["results"]
+                next_page_token = place_result.get("next_page_token")
+                status = "success"
+            else:
+                error_message = place_result.get("error_message", "No places found matching your criteria.")
+        
+        # Format and return the response
+        if status == "success" and places:
+            # Store place data in tool context
+            store_place_data(places, tool_context)
+            
             return {
                 "status": "success",
                 "results": places,
-                "next_page_token": results.get("next_page_token")
+                "next_page_token": next_page_token
             }
         else:
             return {
-                "status": "error",
-                "error_message": f"No places found. Status: {results.get('status')}"
+                "status": "error", 
+                "error_message": error_message or "No places found matching your criteria."
             }
+
     except Exception as e:
         return {
             "status": "error",
             "error_message": f"An error occurred while finding nearby places: {str(e)}"
         }
+
+def search_places(
+    query: str = "",
+    location: str = "current_location",
+    radius: int = 3000,  # Larger radius for more comprehensive results
+    open_now: bool = False,
+    tool_context: ToolContext = None,
+) -> dict:
+    """Simple wrapper for find_places_nearby with minimal parameters for ease of use.
+    
+    This function provides a simpler interface to the more comprehensive find_places_nearby
+    function, requiring fewer parameters for quick searches. It automatically uses the
+    most comprehensive settings to get detailed results.
+    
+    Args:
+        query: Search term for what you're looking for (e.g., "coffee", "restaurants")
+        location: Either "current_location" or a place name (e.g., "Taipei 101")
+        radius: Search radius in meters (default: 3000)
+        open_now: Whether to only show currently open places (default: False)
+        tool_context: The ADK tool context for storing place information
+        
+    Returns:
+        dict: Same format as find_places_nearby
+    """
+    # Use the more comprehensive function with our simplified parameters
+    return find_places_nearby(
+        location=location,
+        radius=radius,
+        keyword=query,
+        open_now=open_now,
+        tool_context=tool_context,
+        # Use all defaults for other parameters to get comprehensive results
+    )
 
 def get_place_details(
     place_name: str,
@@ -193,6 +543,13 @@ def get_place_details(
         and a 'result' key with the place details if successful, or an 'error_message' if an error occurred.
     """
     try:
+        # Validate place_name parameter
+        if not place_name or not place_name.strip():
+            return {
+                "status": "error",
+                "error_message": "Place name cannot be empty. Please provide a specific place name."
+            }
+            
         if not tool_context or "places" not in tool_context.state:
             return {
                 "status": "error",
@@ -207,10 +564,28 @@ def get_place_details(
                 break
 
         if not place_id:
-            return {
-                "status": "error",
-                "error_message": f"Place '{place_name}' not found in stored places."
-            }
+            # Check for partial matches if exact match fails
+            closest_match = None
+            closest_similarity = 0
+            
+            for pid, pname in tool_context.state["places"]:
+                # Simple similarity check - can be enhanced with more sophisticated algorithms
+                if place_name.lower() in pname.lower() or pname.lower() in place_name.lower():
+                    similarity = len(set(place_name.lower()) & set(pname.lower())) / len(set(place_name.lower()) | set(pname.lower()))
+                    if similarity > closest_similarity:
+                        closest_similarity = similarity
+                        closest_match = (pid, pname)
+            
+            if closest_match and closest_similarity > 0.5:  # Threshold for accepting a partial match
+                place_id = closest_match[0]
+                place_name = closest_match[1]  # Update to the matched name
+            else:
+                # List available places to help the user
+                available_places = [pname for _, pname in tool_context.state["places"]]
+                return {
+                    "status": "error",
+                    "error_message": f"Place '{place_name}' not found in stored places. Available places: {', '.join(available_places[:5])}{'...' if len(available_places) > 5 else ''}"
+                }
 
         gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
         place_details = gmaps.place(
