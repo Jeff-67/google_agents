@@ -19,11 +19,7 @@ requirements = [
     "google-cloud-aiplatform[agent_engines,adk]>=1.38.0",
     "python-dotenv",
     "googlemaps",
-    "fastapi",
-    "uvicorn",
-    "httpx",
     "requests",
-    "pathlib",
 ]
 
 # Include local packages needed for the agent

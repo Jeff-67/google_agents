@@ -44,15 +44,6 @@ async def root():
     # Get the Google Maps API key from environment
     google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
     
-    # Log API key information (safely)
-    if google_maps_api_key:
-        masked_key = google_maps_api_key[:4] + "*" * (len(google_maps_api_key) - 8) + google_maps_api_key[-4:] if len(google_maps_api_key) > 8 else "****"
-        logger.info(f"Using Google Maps API key: {masked_key}")
-    else:
-        # List all environment variables that might contain the API key
-        potential_keys = [k for k in os.environ.keys() if 'API' in k or 'KEY' in k or 'GOOGLE' in k or 'MAP' in k]
-        logger.warning(f"No GOOGLE_MAPS_API_KEY found. Potential key variables: {potential_keys}")
-    
     # Read the index.html file
     index_path = STATIC_DIR / "index.html"
     try:
@@ -63,14 +54,7 @@ async def root():
         if google_maps_api_key:
             # Check if the placeholder exists in the HTML
             if "YOUR_API_KEY" in html_content:
-                original_html = html_content
                 html_content = html_content.replace("YOUR_API_KEY", google_maps_api_key)
-                
-                # Verify replacement worked
-                if html_content != original_html:
-                    logger.info("Successfully injected Google Maps API key into index.html")
-                else:
-                    logger.warning("Failed to inject API key - no replacement occurred")
             else:
                 logger.warning("Could not find 'YOUR_API_KEY' placeholder in index.html")
         else:
@@ -123,40 +107,6 @@ async def create_session_proxy(app_name: str, user_id: str, session_id: str, req
         )
     except Exception as e:
         logger.error(f"Error in create_session_proxy: {str(e)}")
-        return JSONResponse(
-            content={"detail": str(e)},
-            status_code=500
-        )
-
-@app.post("/proxy/run")
-async def run_proxy(request: Request):
-    """Proxy for run endpoint (non-streaming)"""
-    try:
-        json_data = await request.json()
-        logger.info(f"Proxying run request for {json_data.get('app_name')}/{json_data.get('session_id')}")
-        
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                "http://0.0.0.0:8000/run",
-                json=json_data
-            )
-            response_data = response.json()
-            
-            # Check for get_current_place function calls and intercept responses
-            processed_data = intercept_function_calls(response_data)
-            
-            return JSONResponse(
-                content=processed_data,
-                status_code=response.status_code
-            )
-    except httpx.TimeoutException:
-        logger.error("Timeout connecting to ADK server")
-        return JSONResponse(
-            content={"detail": "Connection to ADK server timed out - the AI may need more time to process your request"},
-            status_code=504
-        )
-    except Exception as e:
-        logger.error(f"Error in run_proxy: {str(e)}")
         return JSONResponse(
             content={"detail": str(e)},
             status_code=500

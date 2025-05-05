@@ -1,11 +1,27 @@
+import os
 from vertexai import agent_engines
-from vertexai.preview.reasoning_engines import AdkApp
+
+def get_agent_engine():
+    """Get the agent engine"""
+    agent_source = os.getenv("AGENT_RESOURCE_NAME")
+    return agent_engines.get(agent_source)
+
+def create_agent_session(user_id: str):
+    """Create an agent session"""
+    agent_engine = get_agent_engine()
+    return agent_engine.create_session(user_id=user_id)
+
+def get_agent_session(user_id: str, session_id: str):
+    """Get an agent session"""
+    agent_engine = get_agent_engine()
+    return agent_engine.get_session(user_id=user_id, session_id=session_id)
+
 
 # Get the agent engine
-agent_engine = agent_engines.get('projects/758137355851/locations/us-central1/reasoningEngines/8893562528987086848')
+agent_engine = get_agent_engine()
 
 # Create session using the app wrapper
-remote_session = agent_engine.create_session(user_id="u_456")
+remote_session = create_agent_session("u_456")
 
 # Query using the app wrapper
 for event in agent_engine.stream_query(
@@ -14,7 +30,3 @@ for event in agent_engine.stream_query(
     message="recommend me a place to eat in taipei",
 ):
     print(event)
-
-
-
-
