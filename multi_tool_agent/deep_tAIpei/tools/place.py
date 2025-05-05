@@ -208,7 +208,10 @@ def store_place_data(places: list, tool_context: ToolContext = None) -> list:
     
     # Store in tool context if provided
     if tool_context and place_tuples:
-        tool_context.state["places"] = place_tuples
+        # Get existing places or initialize with empty list
+        existing_places = tool_context.state.get("places", [])
+        # Append new place tuples to existing ones
+        tool_context.state["places"] = existing_places + place_tuples
         
     return place_tuples
 

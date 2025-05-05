@@ -1,11 +1,11 @@
 import os
 import requests
-import json
 from google.adk.agents import Agent
 
 from deep_tAIpei.tools.place import get_current_place
 from deep_tAIpei.shared_libraries.constants import FAST_GEMINI_MODEL
 from .prompt import WEATHER_AGENT_INSTRUCTION
+
 
 def google_weather_api(latitude: float, longitude: float, hours: int = 24):
     """
@@ -37,6 +37,7 @@ def google_weather_api(latitude: float, longitude: float, hours: int = 24):
         return response.json()
     except requests.exceptions.RequestException as e:
         raise Exception(f"Error fetching weather data: {str(e)}")
+
 
 weather_agent = Agent(
     name="weather_agent",

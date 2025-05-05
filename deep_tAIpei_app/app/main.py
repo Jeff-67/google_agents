@@ -9,40 +9,13 @@ import asyncio
 import json
 import uuid
 import os
-import re
 import dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables from the deep_tAIpei/.env file
-project_root = Path(__file__).parents[3]  # Go up 3 levels from app/main.py
-env_path = project_root / "multi_tool_agent" / "deep_tAIpei" / ".env"
-logger.info(f"Looking for .env file at {env_path}")
-if env_path.exists():
-    dotenv.load_dotenv(dotenv_path=env_path)
-    logger.info(f"Loaded environment variables from {env_path}")
-    
-    # Debug: Check if we got the API key
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
-
-else:
-    logger.warning(f"Could not find .env file at {env_path}")
-    
-    # Try an alternative path
-    alt_env_path = project_root / "deep_tAIpei" / ".env"
-    logger.info(f"Trying alternative .env path: {alt_env_path}")
-    if alt_env_path.exists():
-        dotenv.load_dotenv(dotenv_path=alt_env_path)
-        logger.info(f"Loaded environment variables from alternative path {alt_env_path}")
-        
-        # Debug: Check if we got the API key
-        api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
-        if api_key:
-            masked_key = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:] if len(api_key) > 8 else "****"
-            logger.info(f"Successfully loaded Google Maps API key from alternative path: {masked_key}")
-        else:
-            logger.error("API key was NOT loaded correctly from alternative path - GOOGLE_MAPS_API_KEY is empty")
+# Load environment variables from .env file
+dotenv.load_dotenv()
 
 app = FastAPI()
 
