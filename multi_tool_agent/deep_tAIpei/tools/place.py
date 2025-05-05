@@ -164,6 +164,7 @@ def get_specific_place(tool_context: ToolContext, place_name: str, query_params:
                 "rating": place.get("rating"),
                 "price_level": place.get("priceLevel"),
                 "types": place.get("types", []),
+                'location': place.get("location", {}),
                 "place_id": place_id
             }
             places.append(place_info)
