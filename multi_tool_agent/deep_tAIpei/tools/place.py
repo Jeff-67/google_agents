@@ -1,93 +1,61 @@
 import os
-import time  # Add time module for timestamp comparison
 import requests
 import googlemaps
+import sys
+import json
+from pathlib import Path
 from google.adk.agents import Agent
 from google.adk.tools import ToolContext
 
+# Path setup for imports
+project_root = str(Path(__file__).parents[3])  # Go up 3 levels from current file
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-def get_current_place(tool_context: ToolContext, source: str = "device") -> dict:
-    """Finds the current place using the Google Maps Geolocation API or state cache.
-    
-    This function can determine location from different sources:
-    - "device": Uses the device's cell tower and WiFi information (requires client-side execution)
-    - "server": Uses the server's IP address (less accurate for end users)
-    - "browser": Uses the browser's IP address (requires client-side execution)
-    - "auto": Tries device first, then falls back to IP-based location
-    
-    The function will first check if a recent location exists in the state cache
-    (less than 5 minutes old) before making an API call.
+# Simplified path to location file - use absolute path
+LOCATION_FILE = Path("/Users/jeff/Desktop/google_agents/browser_location.json")
 
-    Args:
-        tool_context: The tool context containing session state
-        source: Where to get the location from. One of: "device", "server", "browser", "auto"
-               Defaults to "device" for most accurate results.
-
-    Returns:
-        dict: A dictionary containing the place information with a 'status' key ('success' or 'error') 
-        and a 'coordinates' key with lat/lng if successful, or an 'error_message' if an error occurred.
-    """
+def get_current_place() -> dict:
+    """Get the current place coordinates based on browser location"""
     try:
-        # Check if location exists in state and has timestamp
-        current_location = tool_context.state.get("current_location")
-        location_timestamp = tool_context.state.get("current_location_timestamp")
-        
-        # If we have location and it's recent enough (less than 5 minutes old), use it
-        if (current_location and location_timestamp and 
-            (time.time() - location_timestamp) < 300):  # 300 seconds = 5 minutes
+        # Read location from file
+        if not LOCATION_FILE.exists():
             return {
-                "status": "success",
-                "coordinates": current_location,
-                "source": "cache"
+                "status": "error",
+                "error_message": "Location file not found"
             }
             
-        # Otherwise, get fresh location via API
-        gmaps = googlemaps.Client(key=os.getenv("GOOGLE_MAPS_API_KEY"))
+        with open(LOCATION_FILE, 'r') as f:
+            location_data = json.load(f)
+            
+        if not location_data:
+            return {
+                "status": "error",
+                "error_message": "No location data found"
+            }
+            
+        # Get coordinates
+        lat = location_data.get('lat')
+        lng = location_data.get('lng')
         
-        # Prepare the geolocation request parameters
-        geolocation_params = {
-            "consider_ip": True  # Always use IP as fallback since we don't have device data
+        if not lat or not lng:
+            return {
+                "status": "error",
+                "error_message": "Invalid location data"
+            }
+            
+        return {
+            "status": "success",
+            "coordinates": {
+                "lat": lat,
+                "lng": lng
+            },
         }
-
-        try:
-            # Try to get location using geolocation
-            geolocation_result = gmaps.geolocate(**geolocation_params)
             
-            if not geolocation_result or "location" not in geolocation_result:
-                return {
-                    "status": "error",
-                    "error_message": f"Could not determine current location from {source}."
-                }
-                
-            # Get the coordinates and accuracy from geolocation result
-            location = geolocation_result["location"]
-            
-            # Store the coordinates and timestamp in tool context
-            tool_context.state["current_location"] = {
-                "lat": location["lat"],
-                "lng": location["lng"]
-            }
-            tool_context.state["current_location_timestamp"] = time.time()
-            
-            return {
-                "status": "success",
-                "coordinates": {
-                    "lat": location["lat"],
-                    "lng": location["lng"]
-                },
-                "source": source
-            }
-        except Exception as e:
-            if "INVALID_REQUEST" in str(e):
-                return {
-                    "status": "error",
-                    "error_message": "Could not determine location. The request was invalid. This might be because the API key doesn't have the required permissions or the request format was incorrect."
-                }
-            raise e
     except Exception as e:
         return {
             "status": "error",
-            "error_message": f"An error occurred while finding the current place: {str(e)}"
+            "error_message": f"Error getting current place: {str(e)}"
         }
 
 def get_specific_place(tool_context: ToolContext, place_name: str, query_params: dict = None) -> dict:
@@ -340,7 +308,7 @@ def _convert_price_levels(min_price, max_price):
 
 def find_places_nearby(
     location: str = "current_location",
-    radius: int = 2000,  # Increased from 1000 to 2000 meters for more comprehensive results
+    radius: int = 5000,  # Increased from 1000 to 2000 meters for more comprehensive results
     keyword: str = "",
     language: str = "en",
     min_price: int = 0,
@@ -413,16 +381,19 @@ def find_places_nearby(
         # Branch based on location parameter
         if location == "current_location":
             # Get current location coordinates
-            current_place = get_current_place(tool_context)
+            current_place = get_current_place()
             if current_place["status"] == "error":
                 return {
                     "status": "error",
                     "error_message": f"Could not determine current location: {current_place['error_message']}"
                 }
             
+            # Extract coordinates from the response
+            coordinates = current_place["coordinates"]
+            
             # Search for places near coordinates
             status, result, next_page_token = _get_places_by_coordinates(
-                current_place["coordinates"], 
+                coordinates, 
                 search_params
             )
             

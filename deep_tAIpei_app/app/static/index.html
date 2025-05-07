@@ -37,6 +37,65 @@
             });
         });
     </script>
+    <!-- Add browser geolocation script -->
+    <script>
+        // Get user's location and send it to the server
+        function getUserLocation() {
+            console.log('Getting user location...');
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    // Success handler
+                    function(position) {
+                        const location = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude,
+                            accuracy: position.coords.accuracy
+                        };
+                        
+                        console.log('Location obtained:', location);
+                        
+                        // Send location to server
+                        fetch('/proxy/store_location', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(location)
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            console.log('Location stored successfully:', data);
+                        })
+                        .catch(error => {
+                            console.error('Error storing location:', error);
+                        });
+                    },
+                    // Error handler
+                    function(error) {
+                        console.error('Geolocation error:', error.message);
+                    },
+                    // Options
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 5000,
+                        maximumAge: 0
+                    }
+                );
+            } else {
+                console.error('Geolocation is not supported by this browser');
+            }
+        }
+        
+        // Call getUserLocation when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get location immediately
+            getUserLocation();
+            
+            // And refresh it every 5 minutes
+            setInterval(getUserLocation, 5 * 60 * 1000);
+        });
+    </script>
     <script>
         // Flag to track if API loaded successfully
         window.mapsApiLoaded = false;
@@ -872,7 +931,7 @@
 <body>
     <h1>Taipei travel guide built by Google ADK</h1>
     <div id="session-container">
-        <button onclick="createSession()" id="create-session-btn">Create Session</button>
+        <button onclick="createSession()" id="create-session-btn">Click to start chat</button>
     </div>
     <div id="chat-interface" class="hidden">
         <div id="settings-container">

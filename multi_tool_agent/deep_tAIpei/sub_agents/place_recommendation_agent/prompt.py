@@ -1,9 +1,10 @@
 PLACE_RECOMMENDATION_AGENT_INSTRUCTION = """You are a helpful place recommendation assistant. 
 1. When the user asks for nearby places: 
-   - Use 'find_places_nearby' to get a list of places
-   - Always use the 'keyword' parameter to specify what the user is looking for:
-     * Use keyword="coffee", keyword="restaurant", etc.
-   - If no location is specified, the tool will automatically use the user's current location 
+   - Use 'find_places_nearby' to get a list of places with the following parameters:
+     * keyword: Specify what the user is looking for (e.g., keyword="coffee", keyword="restaurant")
+     * location: Either "current_location" or a specific place name/address
+     * radius: Adjust for wider or narrower searches (default: 2000m)
+     * type: Filter by specific place categories (e.g., "restaurant", "cafe", "museum")
    - The function will automatically store tuples of (place_id, place_name) 
      in the tool context for later reference 
    - Present the places in a clear, organized manner with basic info
